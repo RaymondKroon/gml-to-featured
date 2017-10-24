@@ -1,7 +1,9 @@
 (ns gml-to-featured.runner
-  (:require [gml-to-featured.xml :as xml]
-            [gml-to-featured.code :as code]
-            [gml-to-featured.config :as config]
+  (:require [gml-to-featured
+             [xml :as xml]
+             [code :as code]
+             [config :as config]
+             [workers :as workers]]
             [clojure.java.io :as io]
             [clojure.edn :as edn]
             [cheshire.core :as json]
@@ -12,7 +14,10 @@
             [clj-time.format :as f])
   (:gen-class)
   (:import (java.io InputStream OutputStream)
-           (javax.xml.stream.events XMLEvent)))
+           (javax.xml.stream.events XMLEvent)
+           (com.netflix.conductor.client.task WorkflowTaskCoordinator$Builder)
+           (com.netflix.conductor.client.http TaskClient)
+           (gml_to_featured.workers Transformer)))
 
 (def ^:dynamic *sequence-selector* identity)
 (def ^:dynamic *feature-selector* identity)
@@ -198,6 +203,16 @@
                (doseq [fragment file]
                  (.write writer fragment))))))))
 
+
+(defn run-client []
+  (let [client (doto (TaskClient.)
+                 (.setRootURI (config/env :conductor-api-root)))
+        coordinator (.build (doto (WorkflowTaskCoordinator$Builder.)
+                              (.withWorkers [(Transformer. "gml_to_featured" translate)])
+                              (.withThreadCount (config/env :thread-count 1))
+                              (.withTaskClient client)))]
+    (.init coordinator)))
+
   (defn error-msg [errors]
     (str "The following errors occurred while parsing your command:\n\n"
          (string/join \newline errors)))
@@ -225,6 +240,7 @@
   (def cli-options
     [["-h" "--help"]
      ["-v" "--version"]
+     [nil "--conductor-client"]
      [nil "--validity VALIDITY" "Sets validity [date-time-string] globally for all features"]])
 
   (defn -main [& args]
@@ -233,8 +249,10 @@
       (cond
         (:help options) (exit 0 (usage summary))
         (:version options) (exit 0 (implementation-version))
+        (:conductor-client options) (run-client)
         (not= (count arguments) 4) (exit 1 (usage summary))
         errors (exit 1 (error-msg errors)))
       ;; Execute program with options
-      (translate-filesystem (nth arguments 0) (nth arguments 1) (:validity options) (nth arguments 2) (nth arguments 3))))
+      (when-not (:conductor-client options)
+        (translate-filesystem (nth arguments 0) (nth arguments 1) (:validity options) (nth arguments 2) (nth arguments 3)))))
 
