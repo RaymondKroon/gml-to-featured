@@ -9,7 +9,7 @@
            (java.io File)
            (java.util.zip ZipFile ZipEntry ZipOutputStream)
            (com.microsoft.azure.storage CloudStorageAccount)
-           (com.microsoft.azure.storage.blob CloudBlobClient CloudBlockBlob)))
+           (com.microsoft.azure.storage.blob CloudBlobClient CloudBlockBlob CloudBlobContainer BlobContainerPermissions BlobContainerPublicAccessType)))
 
 (defn download-uri [^String uri]
   "Copy to tmp file, return handle"
@@ -42,10 +42,15 @@
       (io/copy instream zipstream))
     target))
 
-(defn upload [^File file]
+(defn make-public! [^CloudBlobContainer container]
+  (let [permissions (doto (BlobContainerPermissions.) (.setPublicAccess BlobContainerPublicAccessType/CONTAINER))]
+    (.uploadPermissions container permissions)))
+
+(defn upload [dataset ^File file]
   (let [storage-account (CloudStorageAccount/parse (config/env :storage-connection-string))
         client (.createCloudBlobClient storage-account)
-        container (.getContainerReference client (config/env :storage-container "gml-to-featured-out"))
+        container (.getContainerReference client (str (config/env :storage-container-prefix "gml-to-featured-out-") dataset))
+        _ (when-not (.exists container) (.create container) (make-public! container))
         blob (.getBlockBlobReference container (.getName file))]
     (with-open [in (io/input-stream file)]
       (.upload blob in (.length file)))
@@ -89,7 +94,7 @@
           (let [blobs
                 (for [json-file (.listFiles target-dir)]
                   (let [zipped (zip json-file)
-                        ^CloudBlockBlob uploaded (upload zipped)]
+                        ^CloudBlockBlob uploaded (upload dataset zipped)]
                     {"name" (.getName uploaded) "uri" (.getUri uploaded)}))]
             (.put output "files" (doall blobs)))
           (do (.delete local-zip)
@@ -98,7 +103,7 @@
               (delete-recursively target-dir)))
         (log/info "... Finished")
         (doto result (.setStatus TaskResult$Status/COMPLETED))
-        (catch Exception e (log/error e) (log/info "... Finished") result)))))
+        (catch Exception e (log/error e) (log/info "... Finished with errors") result)))))
 
 ;(def t (Transformer. "test" (fn [_ _ _ _ _])))
 ;(def test-task (Task.))
