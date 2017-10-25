@@ -207,9 +207,10 @@
 (defn run-client []
   (let [client (doto (TaskClient.)
                  (.setRootURI (config/env :conductor-api-root)))
-        coordinator (.build (doto (WorkflowTaskCoordinator$Builder.)
-                              (.withWorkers [(Transformer. "gml_to_featured" translate)])
-                              (.withThreadCount (config/env :thread-count 1))
+        coordinator (.build (-> (WorkflowTaskCoordinator$Builder.)
+                                (.withWorkers [(Transformer. "gml_to_featured" translate)])
+                                (.withThreadCount (Integer/parseInt (config/env :thread-count "1")))
+                                (.withWorkerQueueSize (* 1 (Integer/parseInt (config/env :thread-count "1"))))
                               (.withTaskClient client)))]
     (.init coordinator)))
 
