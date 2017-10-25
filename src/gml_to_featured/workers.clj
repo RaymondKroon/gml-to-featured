@@ -2,7 +2,8 @@
   (:require [clojure.java.io :as io]
             [clojure.tools.logging :as log]
             [gml-to-featured.zip :refer [xml-entries]]
-            [gml-to-featured.config :as config])
+            [gml-to-featured.config :as config]
+            [clojure.string :as str])
   (:gen-class)
   (:import (com.netflix.conductor.client.worker Worker)
            (com.netflix.conductor.common.metadata.tasks TaskResult$Status TaskResult)
@@ -42,6 +43,9 @@
       (io/copy instream zipstream))
     target))
 
+(defn safe-container-name [name]
+  (-> name (str/lower-case) (str/replace #"_" "-")))
+
 (defn make-public! [^CloudBlobContainer container]
   (let [permissions (doto (BlobContainerPermissions.) (.setPublicAccess BlobContainerPublicAccessType/CONTAINER))]
     (.uploadPermissions container permissions)))
@@ -49,7 +53,8 @@
 (defn upload [dataset ^File file]
   (let [storage-account (CloudStorageAccount/parse (config/env :storage-connection-string))
         client (.createCloudBlobClient storage-account)
-        container (.getContainerReference client (str (config/env :storage-container-prefix "gml-to-featured-out-") dataset))
+        container (.getContainerReference client (safe-container-name
+                                                   (str (config/env :storage-container-prefix "gml-to-featured-out-") dataset)))
         _ (when-not (.exists container) (.create container) (make-public! container))
         blob (.getBlockBlobReference container (.getName file))]
     (with-open [in (io/input-stream file)]
